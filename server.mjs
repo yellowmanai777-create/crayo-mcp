@@ -224,12 +224,22 @@ function buildServer() {
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
+const mcpServer = buildServer();
+
 app.post(`/mcp/${PATH_SECRET}`, async (req, res) => {
-  const server = buildServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  res.on("close", () => { transport.close(); server.close(); });
-  await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
+  try {
+    await mcpServer.connect(transport);
+    const body = typeof req.body === "string" ? req.body : JSON.stringify(req.body || {});
+    await transport.handleRequest(req, res, body);
+  } catch (err) {
+    console.error("MCP request error:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal server error" });
+    }
+  } finally {
+    transport.close();
+  }
 });
 
 app.get("/healthz", (_req, res) => res.send("ok"));
