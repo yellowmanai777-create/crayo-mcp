@@ -8,6 +8,11 @@ const API_BASE = "https://api.crayo.ai";
 const KEY = process.env.CRAYO_API_KEY;
 if (!KEY) { console.error("Set CRAYO_API_KEY"); process.exit(1); }
 const PATH_SECRET = process.env.MCP_PATH_SECRET || crypto.randomBytes(24).toString("base64url");
+// Interpolated into an Express route pattern: regex metacharacters would never match their own URL.
+if (!/^[A-Za-z0-9_-]{16,}$/.test(PATH_SECRET)) {
+  console.error("MCP_PATH_SECRET must be at least 16 base64url characters [A-Za-z0-9_-]");
+  process.exit(1);
+}
 
 async function crayo(method, path, { query, body } = {}) {
   const url = new URL(API_BASE + path);
@@ -222,10 +227,14 @@ function buildServer() {
 }
 
 const app = express();
+app.set("case sensitive routing", true);
+app.set("strict routing", true);
 app.use(express.json({ limit: "1mb" }));
 
 app.all(`/mcp/${PATH_SECRET}`, async (req, res) => {
   console.log(`MCP ${req.method} accept=${req.headers.accept ?? "-"}`);
+  // Stateless server: a GET SSE stream can never carry a message, so don't hold the socket open.
+  if (req.method !== "POST" && req.method !== "DELETE") return res.set("Allow", "POST, DELETE").status(405).end();
   try {
     const server = buildServer();
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
@@ -241,6 +250,16 @@ app.all(`/mcp/${PATH_SECRET}`, async (req, res) => {
 });
 
 app.get("/healthz", (_req, res) => res.send("ok"));
+app.use((_req, res) => res.status(404).json({ error: "not found" }));
+app.use((err, _req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.status ?? err.statusCode ?? 500;
+  if (status >= 500) console.error("Unhandled error:", err);
+  const error = err.type === "entity.parse.failed" ? { code: -32700, message: "Parse error" }
+    : status < 500 ? { code: -32000, message: err.expose ? err.message : "Bad request" }
+    : { code: -32603, message: "Internal error" };
+  res.status(status).json({ jsonrpc: "2.0", error, id: null });
+});
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
