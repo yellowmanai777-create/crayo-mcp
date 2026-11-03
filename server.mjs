@@ -224,21 +224,18 @@ function buildServer() {
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
-const mcpServer = buildServer();
-
 app.post(`/mcp/${PATH_SECRET}`, async (req, res) => {
-  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   try {
-    await mcpServer.connect(transport);
-    const body = typeof req.body === "string" ? req.body : JSON.stringify(req.body || {});
+    const server = buildServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+    const body = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
     await transport.handleRequest(req, res, body);
   } catch (err) {
     console.error("MCP request error:", err);
     if (!res.headersSent) {
-      res.status(500).json({ error: "Internal server error" });
+      res.status(500).json({ error: String(err.message ?? err) });
     }
-  } finally {
-    transport.close();
   }
 });
 
