@@ -224,13 +224,14 @@ function buildServer() {
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
-app.post(`/mcp/${PATH_SECRET}`, async (req, res) => {
+app.all(`/mcp/${PATH_SECRET}`, async (req, res) => {
+  console.log(`MCP ${req.method} accept=${req.headers.accept ?? "-"}`);
   try {
     const server = buildServer();
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on("close", () => { transport.close(); server.close(); });
     await server.connect(transport);
-    const body = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
-    await transport.handleRequest(req, res, body);
+    await transport.handleRequest(req, res, req.body);
   } catch (err) {
     console.error("MCP request error:", err);
     if (!res.headersSent) {
